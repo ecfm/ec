@@ -642,6 +642,7 @@ class RecognitionModel(nn.Module):
             activation = nn.Tanh
         else:
             raise Exception('Unknown activation function ' + str(activation))
+        hidden = hidden + [featureExtractor.outputDimensionality]
         self._MLP = nn.Sequential(*[ layer
                                      for j in range(len(hidden))
                                      for layer in [
