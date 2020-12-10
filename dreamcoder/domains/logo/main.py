@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from dreamcoder.domains.logo.cnn_vae import MMD_VAE
 from dreamcoder.domains.logo.makeLogoTasks import makeTasks, montageTasks, drawLogo
 from dreamcoder.domains.logo.logoPrimitives import primitives, turtle, tangle, tlength
 from dreamcoder.dreamcoder import ecIterator
@@ -113,8 +114,18 @@ class LogoFeatureCNN(nn.Module):
         )
 
         self.outputDimensionality = 256
-
         
+    @staticmethod
+    def get_raw_data(result):
+        return [frontier.highresolution for frontier in result.allFrontiers]
+
+    @staticmethod
+    def train_discriminator(train_loader):
+        net = MMD_VAE().to('cuda')
+        return net
+        # net.train_net(net, learning_rate=.0001, epochs=30, train_loader=train_loader)
+        # return net
+        # TODO: implement this
 
 
     def forward(self, v):

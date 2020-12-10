@@ -360,8 +360,26 @@ def ecIterator(grammar, tasks,
         if useRecognitionModel: ECResult.clearRecognitionModel(path)
             
         sys.exit(0)
-    
-    
+
+    class List_Dataset(torch.utils.data.dataset.Dataset):
+        def __init__(self, _dataset):
+            self.dataset = _dataset
+
+        def __getitem__(self, index):
+            return torch.tensor(self.dataset[index], dtype=torch.float, device='cuda')
+
+        def __len__(self):
+            return len(self.dataset)
+    raw_data = featureExtractor.get_raw_data(result)
+    raw_dataset = List_Dataset(raw_data)
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset=raw_dataset,
+        batch_size=64,
+        shuffle=True
+    )
+    discriminator = featureExtractor.train_discriminator(data_loader)
+    discriminator.eval()
     for j in range(resume or 0, iterations):
         if storeTaskMetrics and rewriteTaskMetrics:
             eprint("Resetting task metrics for next iteration.")
@@ -443,7 +461,8 @@ def ecIterator(grammar, tasks,
                                enumerationTimeout=enumerationTimeout,
                                helmholtzRatio=thisRatio, helmholtzFrontiers=helmholtzFrontiers(),
                                auxiliaryLoss=auxiliaryLoss, cuda=cuda, CPUs=CPUs, solver=solver,
-                               recognitionSteps=recognitionSteps, maximumFrontier=maximumFrontier)
+                               recognitionSteps=recognitionSteps, maximumFrontier=maximumFrontier,
+                               discriminator=discriminator)
 
             showHitMatrix(tasksHitTopDown, tasksHitBottomUp, wakingTaskBatch)
             
@@ -562,7 +581,7 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                       previousRecognitionModel=None, recognitionSteps=None,
                       timeout=None, enumerationTimeout=None, evaluationTimeout=None,
                       helmholtzRatio=None, helmholtzFrontiers=None, maximumFrontier=None,
-                      auxiliaryLoss=None, cuda=None, CPUs=None, solver=None):
+                      auxiliaryLoss=None, cuda=None, CPUs=None, solver=None, discriminator=None):
     eprint("Using an ensemble size of %d. Note that we will only store and test on the best recognition model." % ensembleSize)
 
     featureExtractorObjects = [featureExtractor(tasks, testingTasks=testingTasks, cuda=cuda) for i in range(ensembleSize)]
@@ -586,7 +605,8 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                                                                          steps=recognitionSteps,
                                                                          helmholtzRatio=helmholtzRatio,
                                                                          auxLoss=auxiliaryLoss,
-                                                                         vectorized=True),
+                                                                         vectorized=True,
+                                                                         discriminator=discriminator),
                                      recognizers,
                                      seedRandom=True)
     eprint(f"Currently using this much memory: {getThisMemoryUsage()}")

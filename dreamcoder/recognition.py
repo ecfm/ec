@@ -851,7 +851,7 @@ class RecognitionModel(nn.Module):
     def train(self, frontiers, _=None, steps=None, lr=0.001, topK=5, CPUs=1,
               timeout=None, evaluationTimeout=0.001,
               helmholtzFrontiers=[], helmholtzRatio=0., helmholtzBatch=500,
-              biasOptimal=None, defaultRequest=None, auxLoss=False, vectorized=True):
+              biasOptimal=None, defaultRequest=None, auxLoss=False, vectorized=True, discriminator=None):
         """
         helmholtzRatio: What fraction of the training data should be forward samples from the generative model?
         helmholtzFrontiers: Frontiers from programs enumerated from generative model (optional)
@@ -1047,7 +1047,10 @@ class RecognitionModel(nn.Module):
                 if is_torch_invalid(loss):
                     eprint("Invalid real-data loss!")
                 else:
-                    (loss + classificationLoss).backward()
+                    if dreaming and (not discriminator is None):
+                        ((loss + classificationLoss) * discriminator.get_prob(frontier)).backward()
+                    else:
+                        (loss + classificationLoss).backward()
                     classificationLosses.append(classificationLoss.data.item())
                     optimizer.step()
                     totalGradientSteps += 1
