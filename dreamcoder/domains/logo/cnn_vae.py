@@ -126,7 +126,7 @@ class MMD_VAE(nn.Module):
         return 1
 
     @staticmethod
-    def train_net(net, learning_rate, epochs, train_loader, optimizer='Adam'):
+    def train_model(net, learning_rate, epochs, train_loader, optimizer='Adam'):
         if optimizer == 'Adam':
             optimizer = optim.Adam(net.parameters(), lr=learning_rate)
         elif optimizer == 'SGD':

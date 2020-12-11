@@ -13,6 +13,7 @@ from dreamcoder.type import Context, arrow, tbool, tlist, tint, t0, UnificationF
 from dreamcoder.domains.list.listPrimitives import basePrimitives, primitives, McCarthyPrimitives, bootstrapTarget_extra, no_length
 from dreamcoder.recognition import RecurrentFeatureExtractor
 from dreamcoder.domains.list.makeListTasks import make_list_bootstrap_tasks, sortBootstrap, EASYLISTTASKS
+from dreamcoder.domains.list.train import train_model
 
 
 def retrieveJSONTasks(filename, features=False):
@@ -205,6 +206,26 @@ class LearnedFeatureExtractor(RecurrentFeatureExtractor):
             H=self.H,
             bidirectional=True)
 
+    def train_discriminator(self, save_dir, result):
+        raw_data = []
+        for frontier in result.allFrontiers.values():
+            examples = frontier.task.examples
+            tokenized = self.tokenize(examples)
+            if not tokenized:
+                continue
+            es = []
+            for xs, y in tokenized:
+                e = ["STARTING"]
+                for x in xs:
+                    e = e + x + ["ENDOFINPUT"]
+                e.append("STARTOFOUTPUT")
+                e = e + y + ["ENDING"]
+                es.append(e)
+            raw_data = raw_data + es
+        if len(raw_data) == 0:
+            return None
+        return train_model(save_dir, raw_data)
+
 
 def train_necessary(t):
     if t.name in {"head", "is-primes", "len", "pop", "repeat-many", "tail", "keep primes", "keep squares"}:
@@ -235,6 +256,7 @@ def list_options(parser):
         type=str,
         default="Lucas-old",
         choices=[
+            "debug",
             "bootstrap",
             "sorting",
             "Lucas-old",
@@ -272,6 +294,7 @@ def main(args):
         "Lucas-old": lambda: retrieveJSONTasks("data/list_tasks.json") + sortBootstrap(),
         "bootstrap": make_list_bootstrap_tasks,
         "sorting": sortBootstrap,
+        "debug": lambda: retrieveJSONTasks("data/list_tasks2.json")[:10],
         "Lucas-depth1": lambda: retrieveJSONTasks("data/list_tasks2.json")[:105],
         "Lucas-depth2": lambda: retrieveJSONTasks("data/list_tasks2.json")[:4928],
         "Lucas-depth3": lambda: retrieveJSONTasks("data/list_tasks2.json"),

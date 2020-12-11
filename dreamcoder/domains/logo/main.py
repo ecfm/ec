@@ -76,6 +76,17 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
 
 
+class ListDataset(torch.utils.data.dataset.Dataset):
+    def __init__(self, _dataset):
+        self.dataset = _dataset
+
+    def __getitem__(self, index):
+        return torch.tensor(self.dataset[index], dtype=torch.float, device='cuda')
+
+    def __len__(self):
+        return len(self.dataset)
+
+
 class LogoFeatureCNN(nn.Module):
     special = "LOGO"
     
@@ -114,13 +125,17 @@ class LogoFeatureCNN(nn.Module):
         )
 
         self.outputDimensionality = 256
-        
-    @staticmethod
-    def get_raw_data(result):
-        return [frontier.highresolution for frontier in result.allFrontiers]
 
     @staticmethod
-    def train_discriminator(train_loader):
+    def train_discriminator(result):
+        raw_data = [frontier.highresolution for frontier in result.allFrontiers]
+        raw_dataset = ListDataset(raw_data)
+
+        data_loader = torch.utils.data.DataLoader(
+            dataset=raw_dataset,
+            batch_size=64,
+            shuffle=True
+        )
         net = MMD_VAE().to('cuda')
         return net
         # net.train_net(net, learning_rate=.0001, epochs=30, train_loader=train_loader)

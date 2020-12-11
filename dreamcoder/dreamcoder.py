@@ -361,25 +361,9 @@ def ecIterator(grammar, tasks,
             
         sys.exit(0)
 
-    class List_Dataset(torch.utils.data.dataset.Dataset):
-        def __init__(self, _dataset):
-            self.dataset = _dataset
-
-        def __getitem__(self, index):
-            return torch.tensor(self.dataset[index], dtype=torch.float, device='cuda')
-
-        def __len__(self):
-            return len(self.dataset)
-    raw_data = featureExtractor.get_raw_data(result)
-    raw_dataset = List_Dataset(raw_data)
-
-    data_loader = torch.utils.data.DataLoader(
-        dataset=raw_dataset,
-        batch_size=64,
-        shuffle=True
-    )
-    discriminator = featureExtractor.train_discriminator(data_loader)
-    discriminator.eval()
+    extractor = featureExtractor(tasks, testingTasks, cuda)
+    discriminator = extractor.train_discriminator(outputPrefix, result)
+    # discriminator.eval()
     for j in range(resume or 0, iterations):
         if storeTaskMetrics and rewriteTaskMetrics:
             eprint("Resetting task metrics for next iteration.")
