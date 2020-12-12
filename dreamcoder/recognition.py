@@ -1048,7 +1048,7 @@ class RecognitionModel(nn.Module):
                     eprint("Invalid real-data loss!")
                 else:
                     if dreaming and (not discriminator is None):
-                        ((loss + classificationLoss) * discriminator.get_prob(frontier)).backward()
+                        ((loss + classificationLoss) * discriminator.get_weights(frontier)).backward()
                     else:
                         (loss + classificationLoss).backward()
                     classificationLosses.append(classificationLoss.data.item())

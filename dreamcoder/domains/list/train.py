@@ -15,20 +15,24 @@ BATCH_SIZE = 64
 DIM_EMB = 128
 DIM_H = 128
 DIM_Z = 16
-EPOCHS = 200
+EPOCHS = 100
 
 
 def evaluate(model, batches):
     model.eval()
     meters = collections.defaultdict(lambda: AverageMeter())
+    mmd_all = []
     with torch.no_grad():
         for inputs, targets in batches:
             losses = model.autoenc(inputs, targets)
             for k, v in losses.items():
-                meters[k].update(v.item(), inputs.size(1))
+                if k == 'mmd_all':
+                    mmd_all.extend(v)
+                else:
+                    meters[k].update(v.item(), inputs.size(1))
     loss = model.loss({k: meter.avg for k, meter in meters.items()})
     meters['loss'].update(loss)
-    return meters
+    return meters, mmd_all
 
 
 def train_model(save_dir, raw_data, epochs=100):
@@ -58,6 +62,8 @@ def train_model(save_dir, raw_data, epochs=100):
     train_batches, _ = get_batches(train_sents, vocab, device=device, batch_size=64)
     valid_batches, _ = get_batches(valid_sents, vocab,  device=device, batch_size=64)
     best_val_loss = None
+    best_train_mmd_all = None
+    best_valid_mmd_all = None
     best_model_path = os.path.join(save_dir, 'best_discriminator.pt')
     for epoch in range(epochs):
         start_time = time.time()
@@ -66,12 +72,16 @@ def train_model(save_dir, raw_data, epochs=100):
         meters = collections.defaultdict(lambda: AverageMeter())
         indices = list(range(len(train_batches)))
         random.shuffle(indices)
+        train_mmd_all = []
         for i, idx in enumerate(indices):
             inputs, targets = train_batches[idx]
             losses = model.autoenc(inputs, targets, is_train=True)
             losses['loss'] = model.loss(losses)
+            train_mmd_all.extend(losses['mmd_all'])
             model.step(losses)
             for k, v in losses.items():
+                if k == 'mmd_all':
+                    continue
                 meters[k].update(v.item())
 
             if (i + 1) % 10 == 0:
@@ -82,20 +92,31 @@ def train_model(save_dir, raw_data, epochs=100):
                     meter.clear()
                 logging(log_output, log_file)
 
-        valid_meters = evaluate(model, valid_batches)
+        valid_meters, valid_mmd_all = evaluate(model, valid_batches)
         logging('-' * 80, log_file)
         log_output = '| end of epoch {:3d} | time {:5.0f}s | valid'.format(
             epoch + 1, time.time() - start_time)
         for k, meter in valid_meters.items():
-            log_output += ' {} {:.2f},'.format(k, meter.avg)
+            log_output += ' {} {:.4f},'.format(k, meter.avg)
         if not best_val_loss or valid_meters['loss'].avg < best_val_loss:
             log_output += ' | saving model'
             ckpt = {'model': model.state_dict()}
             torch.save(ckpt, best_model_path)
             best_val_loss = valid_meters['loss'].avg
+            best_train_mmd_all = train_mmd_all
+            best_valid_mmd_all = valid_mmd_all
         logging(log_output, log_file)
     logging('Done training', log_file)
     ckpt = torch.load(best_model_path)
     model.load_state_dict(ckpt['model'])
     model.flatten()
+    import matplotlib.pyplot as plt
+    import numpy as np
+    print(np.histogram(best_train_mmd_all, density=True))
+    print(np.histogram(best_valid_mmd_all, density=True))
+
+    plt.hist(best_train_mmd_all)
+    plt.show()
+    plt.hist(best_valid_mmd_all)
+    plt.show()
     return model

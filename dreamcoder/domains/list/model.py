@@ -6,6 +6,7 @@ import torch.optim as optim
 
 
 def reparameterize(mu, logvar):
+    # [dim_z, batch_size]
     std = torch.exp(0.5*logvar)
     eps = torch.randn_like(std)
     return eps.mul(std).add_(mu)
@@ -17,6 +18,9 @@ def log_prob(z, mu, logvar):
 
 def loss_kl(mu, logvar):
     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / len(mu)
+
+# def loss_kl_all(mu, logvar): # kl's of the whole batch
+#     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), axis=1) / len(mu)
 
 
 class TextModel(nn.Module):
@@ -93,7 +97,7 @@ class DAE(TextModel):
     def loss_rec(self, logits, targets):
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1),
             ignore_index=self.vocab.pad, reduction='none').view(targets.size())
-        return loss.sum(dim=0)
+        return loss
 
     def loss(self, losses):
         return losses['rec']
@@ -149,10 +153,26 @@ class MMD_VAE(DAE):
     def loss(self, losses):
         return losses['rec'] + losses['mmd']
 
+    def reparameterize_samples(self, mu, logvar):
+        eps = torch.randn(200, self.dim_z, requires_grad=False).to('cuda')
+        std = torch.exp(0.5 * logvar)
+        return eps.mul(std).add_(mu)
+
+
+    def sample_mmd(self, mu, logvar):
+        return MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'),
+                   self.reparameterize_samples(mu, logvar)).item()
+
     def autoenc(self, inputs, targets, is_train=False):
         mu, logvar, z, logits = self(inputs, is_train)
         return {'rec': self.loss_rec(logits, targets).mean(),
-                'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z)}
+                'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z),
+                'mmd_all': [self.sample_mmd(mu[i, :], logvar[i, :])
+                            for i in range(inputs.shape[1])]}
+
+    def get_weights(self, inputs):
+        mu, logvar, z, logits = self(inputs, False)
+        return [max(0, 1 - self.sample_mmd(mu[i, :], logvar[i, :])) for i in range(inputs.shape[1])]
 
 def gaussian_kernel(a, b):
     dim1_1, dim1_2 = a.shape[0], b.shape[0]
@@ -166,6 +186,3 @@ def gaussian_kernel(a, b):
 
 def MMD(a, b):
     return gaussian_kernel(a, a).mean() + gaussian_kernel(b, b).mean() - 2 * gaussian_kernel(a, b).mean()
-
-def loss_function(pred, true, latent):
-    return (pred - true).pow(2).mean(), MMD(torch.randn(200, LATENT_SIZE, requires_grad=False).to(DEVICE), latent)
