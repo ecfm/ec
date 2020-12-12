@@ -1,3 +1,4 @@
+from dreamcoder.domains.list.train import plot_hist
 from dreamcoder.enumeration import *
 from dreamcoder.grammar import *
 # luke
@@ -800,8 +801,8 @@ class RecognitionModel(nn.Module):
                 for task in tasks}
 
     def frontierKL(self, frontier, auxiliary=False, vectorized=True):
-        features = self.featureExtractor.featuresOfTask(frontier.task)
-        if features is None: return None, None
+        features, examples = self.featureExtractor.featuresOfTask(frontier.task, return_examples=True)
+        if features is None: return None, None, None
         # Monte Carlo estimate: draw a sample from the frontier
         entry = frontier.sample()
 
@@ -809,11 +810,11 @@ class RecognitionModel(nn.Module):
 
         if not vectorized:
             g = self(features)
-            return - entry.program.logLikelihood(g), al
+            return - entry.program.logLikelihood(g), al, examples
         else:
             features = self._MLP(features).expand(1, features.size(-1))
             ll = self.grammarBuilder.batchedLogLikelihoods(features, [entry.program]).view(-1)
-            return -ll, al
+            return -ll, al, examples
             
 
     def frontierBiasOptimal(self, frontier, auxiliary=False, vectorized=True):
@@ -850,8 +851,9 @@ class RecognitionModel(nn.Module):
 
     def train(self, frontiers, _=None, steps=None, lr=0.001, topK=5, CPUs=1,
               timeout=None, evaluationTimeout=0.001,
-              helmholtzFrontiers=[], helmholtzRatio=0., helmholtzBatch=500,
-              biasOptimal=None, defaultRequest=None, auxLoss=False, vectorized=True, discriminator=None):
+              helmholtzFrontiers=[], helmholtzRatio=0., helmholtzBatch=None,
+              biasOptimal=None, defaultRequest=None, auxLoss=False, vectorized=True, discriminator=None,
+              outputPrefix=None, iteration=None):
         """
         helmholtzRatio: What fraction of the training data should be forward samples from the generative model?
         helmholtzFrontiers: Frontiers from programs enumerated from generative model (optional)
@@ -1010,10 +1012,12 @@ class RecognitionModel(nn.Module):
 
         optimizer = torch.optim.Adam(self.parameters(), lr=lr, eps=1e-3, amsgrad=True)
         start = time.time()
-        losses, descriptionLengths, realLosses, dreamLosses, realMDL, dreamMDL = [], [], [], [], [], []
+        losses, descriptionLengths, realLosses, dreamLosses, realMDL, dreamMDL, dreamMMD = \
+            [], [], [], [], [], [], []
         classificationLosses = []
         totalGradientSteps = 0
         epochs = 9999999
+        dreamMMD_means = []
         for i in range(1, epochs + 1):
             if timeout and time.time() - start > timeout:
                 break
@@ -1033,7 +1037,7 @@ class RecognitionModel(nn.Module):
                 dreaming = random.random() < helmholtzRatio
                 if dreaming: frontier = getHelmholtz()
                 self.zero_grad()
-                loss, classificationLoss = \
+                loss, classificationLoss, examples = \
                         self.frontierBiasOptimal(frontier, auxiliary=auxLoss, vectorized=vectorized) if biasOptimal \
                         else self.frontierKL(frontier, auxiliary=auxLoss, vectorized=vectorized)
                 if loss is None:
@@ -1047,8 +1051,10 @@ class RecognitionModel(nn.Module):
                 if is_torch_invalid(loss):
                     eprint("Invalid real-data loss!")
                 else:
-                    if dreaming and (not discriminator is None):
-                        ((loss + classificationLoss) * discriminator.get_weights(frontier)).backward()
+                    if dreaming and (not discriminator is None) and (not examples is None):
+                        weight, mmd = discriminator.get_weights(self.featureExtractor, examples)
+                        dreamMMD.append(mmd)
+                        ((loss + classificationLoss) * weight).backward()
                     else:
                         (loss + classificationLoss).backward()
                     classificationLosses.append(classificationLoss.data.item())
@@ -1068,18 +1074,30 @@ class RecognitionModel(nn.Module):
             if (i == 1 or i % 10 == 0) and losses:
                 eprint("(ID=%d): " % self.id, "Epoch", i, "Loss", mean(losses))
                 if realLosses and dreamLosses:
-                    eprint("(ID=%d): " % self.id, "\t\t(real loss): ", mean(realLosses), "\t(dream loss):", mean(dreamLosses))
+                    eprint("(ID=%d): " % self.id, "\t\t(real loss): ", mean(realLosses),
+                           "\t(dream loss):", mean(dreamLosses), "\t(dream MMD):", mean(dreamMMD))
+                if dreamMMD:
+                    eprint("(ID=%d): " % self.id, "\t\t(dream MMD) mean:", mean(dreamMMD),
+                           "\thistogram:", np.histogram(dreamMMD, density=True))
+                    dreamMMD_means.append(mean(dreamMMD))
                 eprint("(ID=%d): " % self.id, "\tvs MDL (w/o neural net)", mean(descriptionLengths))
                 if realMDL and dreamMDL:
                     eprint("\t\t(real MDL): ", mean(realMDL), "\t(dream MDL):", mean(dreamMDL))
                 eprint("(ID=%d): " % self.id, "\t%d cumulative gradient steps. %f steps/sec"%(totalGradientSteps,
                                                                        totalGradientSteps/(time.time() - start)))
-                eprint("(ID=%d): " % self.id, "\t%d-way auxiliary classification loss"%len(self.grammar.primitives),sum(classificationLosses)/len(classificationLosses))
-                losses, descriptionLengths, realLosses, dreamLosses, realMDL, dreamMDL = [], [], [], [], [], []
+                eprint("(ID=%d): " % self.id, "\t%d-way auxiliary classification loss"%len(self.grammar.primitives),
+                       sum(classificationLosses)/len(classificationLosses))
+                losses, descriptionLengths, realLosses, dreamLosses, realMDL, dreamMDL, dreamMMD = \
+                    [], [], [], [], [], [], []
                 classificationLosses = []
                 gc.collect()
-        
-        eprint("(ID=%d): " % self.id, " Trained recognition model in",time.time() - start,"seconds")
+
+        eprint("(ID=%d): " % self.id, " Trained recognition model in",time.time() - start,"seconds; dreamMMD_mean=",
+               mean(dreamMMD_means), "\thistogram:", np.histogram(dreamMMD_means, density=True))
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plot_hist(dreamMMD, 'dream')
+        plt.savefig(os.path.join(outputPrefix, 'dream_dist_iter_%d.png' % iteration))
         self.trained=True
         return self
 
@@ -1284,7 +1302,7 @@ class RecurrentFeatureExtractor(nn.Module):
         x = pack_padded_sequence(x, sizes)
         return x, sizes
 
-    def examplesEncoding(self, examples):
+    def examplesEncoding(self, examples, return_examples=False):
         examples = sorted(examples, key=lambda xs_y: sum(
             len(z) + 1 for z in xs_y[0]) + len(xs_y[1]), reverse=True)
         x, sizes = self.packExamples(examples)
@@ -1292,9 +1310,12 @@ class RecurrentFeatureExtractor(nn.Module):
         # outputs, sizes = pad_packed_sequence(outputs)
         # I don't know whether to return the final output or the final hidden
         # activations...
-        return hidden[0, :, :] + hidden[1, :, :]
+        if return_examples:
+            return hidden[0, :, :] + hidden[1, :, :], examples
+        else:
+            return hidden[0, :, :] + hidden[1, :, :]
 
-    def forward(self, examples):
+    def forward(self, examples, return_examples=False):
         tokenized = self.tokenize(examples)
         if not tokenized:
             return None
@@ -1303,7 +1324,10 @@ class RecurrentFeatureExtractor(nn.Module):
             tokenized = list(tokenized)
             random.shuffle(tokenized)
             tokenized = tokenized[:self.MAXINPUTS]
-        e = self.examplesEncoding(tokenized)
+        if return_examples:
+            e, examples = self.examplesEncoding(tokenized, return_examples)
+        else:
+            e = self.examplesEncoding(tokenized, return_examples)
         # max pool
         # e,_ = e.max(dim = 0)
 
@@ -1311,15 +1335,18 @@ class RecurrentFeatureExtractor(nn.Module):
         # I think this might be better because we might be testing on data
         # which has far more o far fewer examples then training
         e = e.mean(dim=0)
-        return e
+        if return_examples:
+            return e, examples
+        else:
+            return e
 
-    def featuresOfTask(self, t):
+    def featuresOfTask(self, t, return_examples=False):
         if hasattr(self, 'useFeatures'):
-            f = self(t.features)
+            result = self(t.features, return_examples)
         else:
             # Featurize the examples directly.
-            f = self(t.examples)
-        return f
+            result = self(t.examples, return_examples)
+        return result
 
     def taskOfProgram(self, p, tp):
         # half of the time we randomly mix together inputs

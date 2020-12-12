@@ -10,12 +10,14 @@ from dreamcoder.domains.list.meter import AverageMeter
 from dreamcoder.domains.list.model import VAE, MMD_VAE
 from dreamcoder.domains.list.utils import set_seed, logging, load_sent
 from dreamcoder.domains.list.vocab import Vocab
+import numpy as np
+import matplotlib.pyplot as plt
 
 BATCH_SIZE = 64
 DIM_EMB = 128
 DIM_H = 128
-DIM_Z = 16
-EPOCHS = 100
+DIM_Z = 8
+EPOCHS = 20
 
 
 def evaluate(model, batches):
@@ -35,7 +37,11 @@ def evaluate(model, batches):
     return meters, mmd_all
 
 
-def train_model(save_dir, raw_data, epochs=100):
+def plot_hist(x, label, alpha=1.):
+    plt.hist(x, weights=np.ones_like(x) / len(x), label=label, bins=20, alpha=alpha)
+
+
+def train_model(save_dir, raw_data, epochs=EPOCHS):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     log_file = os.path.join(save_dir, 'log.txt')
@@ -110,13 +116,14 @@ def train_model(save_dir, raw_data, epochs=100):
     ckpt = torch.load(best_model_path)
     model.load_state_dict(ckpt['model'])
     model.flatten()
-    import matplotlib.pyplot as plt
-    import numpy as np
+    print("Best train MMD losses histogram:")
     print(np.histogram(best_train_mmd_all, density=True))
+    print("Best valid MMD losses histogram:")
     print(np.histogram(best_valid_mmd_all, density=True))
-
-    plt.hist(best_train_mmd_all)
-    plt.show()
-    plt.hist(best_valid_mmd_all)
-    plt.show()
+    plt.figure()
+    plot_hist(best_train_mmd_all, 'train')
+    plt.savefig(os.path.join(save_dir, 'train_dist.png'))
+    plt.figure()
+    plot_hist(best_train_mmd_all, 'valid')
+    plt.savefig(os.path.join(save_dir, 'valid_dist.png'))
     return model

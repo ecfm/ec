@@ -155,6 +155,7 @@ def ecIterator(grammar, tasks,
                recognitionTimeout=None,
                recognitionSteps=None,
                helmholtzRatio=0.,
+               helmholtzBatch=None,
                featureExtractor=None,
                activation='relu',
                topK=1,
@@ -443,10 +444,10 @@ def ecIterator(grammar, tasks,
                                previousRecognitionModel=previousRecognitionModel, matrixRank=matrixRank,
                                timeout=recognitionTimeout, evaluationTimeout=evaluationTimeout,
                                enumerationTimeout=enumerationTimeout,
-                               helmholtzRatio=thisRatio, helmholtzFrontiers=helmholtzFrontiers(),
+                               helmholtzRatio=thisRatio, helmholtzBatch=helmholtzBatch, helmholtzFrontiers=helmholtzFrontiers(),
                                auxiliaryLoss=auxiliaryLoss, cuda=cuda, CPUs=CPUs, solver=solver,
                                recognitionSteps=recognitionSteps, maximumFrontier=maximumFrontier,
-                               discriminator=discriminator)
+                               discriminator=discriminator, outputPrefix=outputPrefix, iteration=j)
 
             showHitMatrix(tasksHitTopDown, tasksHitBottomUp, wakingTaskBatch)
             
@@ -564,8 +565,9 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                       activation=None, contextual=True, biasOptimal=True,
                       previousRecognitionModel=None, recognitionSteps=None,
                       timeout=None, enumerationTimeout=None, evaluationTimeout=None,
-                      helmholtzRatio=None, helmholtzFrontiers=None, maximumFrontier=None,
-                      auxiliaryLoss=None, cuda=None, CPUs=None, solver=None, discriminator=None):
+                      helmholtzRatio=None, helmholtzBatch=None, helmholtzFrontiers=None, maximumFrontier=None,
+                      auxiliaryLoss=None, cuda=None, CPUs=None, solver=None, discriminator=None, outputPrefix=None,
+                      iteration=None):
     eprint("Using an ensemble size of %d. Note that we will only store and test on the best recognition model." % ensembleSize)
 
     featureExtractorObjects = [featureExtractor(tasks, testingTasks=testingTasks, cuda=cuda) for i in range(ensembleSize)]
@@ -582,7 +584,8 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
     trainedRecognizers = parallelMap(min(CPUs,len(recognizers)),
                                      lambda recognizer: recognizer.train(allFrontiers,
                                                                          biasOptimal=biasOptimal,
-                                                                         helmholtzFrontiers=helmholtzFrontiers, 
+                                                                         helmholtzFrontiers=helmholtzFrontiers,
+                                                                         helmholtzBatch=helmholtzBatch,
                                                                          CPUs=CPUs,
                                                                          evaluationTimeout=evaluationTimeout,
                                                                          timeout=timeout,
@@ -590,7 +593,9 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                                                                          helmholtzRatio=helmholtzRatio,
                                                                          auxLoss=auxiliaryLoss,
                                                                          vectorized=True,
-                                                                         discriminator=discriminator),
+                                                                         discriminator=discriminator,
+                                                                         outputPrefix=outputPrefix,
+                                                                         iteration=iteration),
                                      recognizers,
                                      seedRandom=True)
     eprint(f"Currently using this much memory: {getThisMemoryUsage()}")
@@ -862,6 +867,12 @@ def commandlineArguments(_=None,
         helmholtzRatio,
         default=helmholtzRatio,
         type=float)
+    parser.add_argument(
+        "--helmholtzBatch",
+        dest="helmholtzBatch",
+        help="Helmholtz batch size.",
+        default=500,
+        type=int)
     parser.add_argument(
         "--compressor",
         default=compressor,

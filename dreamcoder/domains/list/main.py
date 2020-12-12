@@ -206,22 +206,31 @@ class LearnedFeatureExtractor(RecurrentFeatureExtractor):
             H=self.H,
             bidirectional=True)
 
+    def tokenized_to_idx(self, tokenized):
+        es = []
+        for xs, y in tokenized:
+            e = [self.startingIndex]
+            for x in xs:
+                for s in x:
+                    e.append(self.symbolToIndex[s])
+                e.append(self.endOfInputIndex)
+            e.append(self.startOfOutputIndex)
+            for s in y:
+                e.append(self.symbolToIndex[s])
+            e.append(self.endingIndex)
+            es.append(e)
+        return es
+
+    def get_data(self, examples):
+        tokenized = self.tokenize(examples)
+        if not tokenized:
+            return []
+        return self.tokenized_to_idx(tokenized)
+
     def train_discriminator(self, save_dir, result):
         raw_data = []
         for frontier in result.allFrontiers.values():
-            examples = frontier.task.examples
-            tokenized = self.tokenize(examples)
-            if not tokenized:
-                continue
-            es = []
-            for xs, y in tokenized:
-                e = ["STARTING"]
-                for x in xs:
-                    e = e + x + ["ENDOFINPUT"]
-                e.append("STARTOFOUTPUT")
-                e = e + y + ["ENDING"]
-                es.append(e)
-            raw_data = raw_data + es
+            raw_data.extend(self.get_data(frontier.task.examples))
         if len(raw_data) == 0:
             return None
         return train_model(save_dir, raw_data)

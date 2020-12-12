@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from dreamcoder.domains.list.batchify import get_batch
+
 
 def reparameterize(mu, logvar):
     # [dim_z, batch_size]
@@ -170,9 +172,13 @@ class MMD_VAE(DAE):
                 'mmd_all': [self.sample_mmd(mu[i, :], logvar[i, :])
                             for i in range(inputs.shape[1])]}
 
-    def get_weights(self, inputs):
-        mu, logvar, z, logits = self(inputs, False)
-        return [max(0, 1 - self.sample_mmd(mu[i, :], logvar[i, :])) for i in range(inputs.shape[1])]
+    def get_weights(self, extractor, examples):
+        data = extractor.get_data(examples)
+        inputs, targets = get_batch(data, self.vocab, 'cuda')
+        mu, logvar = self.encode(inputs)
+        z = reparameterize(mu, logvar)
+        mmd = MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z).item()
+        return 1-mmd, mmd
 
 def gaussian_kernel(a, b):
     dim1_1, dim1_2 = a.shape[0], b.shape[0]
