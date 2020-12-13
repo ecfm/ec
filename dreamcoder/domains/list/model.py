@@ -44,12 +44,12 @@ class TextModel(nn.Module):
 class DAE(TextModel):
     """Denoising Auto-Encoder"""
 
-    def __init__(self, vocab, dim_emb=64, dim_h=64, dim_z=16, lr=0.0005, nlayers=2, dropout=0.1):
+    def __init__(self, vocab, dim_emb, dim_h, dim_z, lr=0.0005, nlayers=1, dropout=0.1):
         super().__init__(vocab, dim_emb, dim_h)
         self.drop = nn.Dropout(dropout)
-        self.E = nn.LSTM(dim_emb, dim_h, nlayers,
+        self.E = nn.GRU(dim_emb, dim_h, nlayers,
             dropout=dropout if nlayers > 1 else 0, bidirectional=True)
-        self.G = nn.LSTM(dim_emb, dim_h, nlayers,
+        self.G = nn.GRU(dim_emb, dim_h, nlayers,
             dropout=dropout if nlayers > 1 else 0)
         self.h2mu = nn.Linear(dim_h*2, dim_z)
         self.h2logvar = nn.Linear(dim_h*2, dim_z)
