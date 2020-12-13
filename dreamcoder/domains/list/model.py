@@ -177,8 +177,8 @@ class MMD_VAE(DAE):
     def autoenc(self, inputs, targets, is_train=False):
         if is_train:
             mu, logvar, z, logits = self(inputs, is_train)
-            return {'rec': self.loss_rec(logits, targets).mean(),
-                    'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z)}
+            return z, {'rec': self.loss_rec(logits, targets).mean(),
+                       'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z)}
         else:
             z = self(inputs, is_train)
             return z, {}
