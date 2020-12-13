@@ -44,10 +44,7 @@ def train_model(save_dir, raw_data, epochs=EPOCHS):
         len(train_sents), sum(len(s) for s in train_sents)), log_file)
     logging('# valid sents {}, tokens {}'.format(
         len(valid_sents), sum(len(s) for s in valid_sents)), log_file)
-    vocab_file = os.path.join(save_dir, 'vocab.txt')
-    if not os.path.isfile(vocab_file):
-        Vocab.build(train_sents, vocab_file, 5000)
-    vocab = Vocab(vocab_file)
+    vocab = Vocab(raw_data)
     logging('# vocab size {}'.format(vocab.size), log_file)
 
     set_seed(1111)

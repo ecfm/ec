@@ -4,6 +4,7 @@ from dreamcoder.domains.list.batchify import get_batch
 from dreamcoder.domains.list.meter import AverageMeter
 from dreamcoder.domains.list.model import VAE_Encoder, MMD_VAE
 from dreamcoder.domains.list.train import plot_hist
+from dreamcoder.domains.list.vocab import Vocab
 from dreamcoder.enumeration import *
 from dreamcoder.grammar import *
 # luke
@@ -1170,31 +1171,6 @@ class RecognitionModel(nn.Module):
                                     enumerationTimeout=enumerationTimeout,
                                     CPUs=CPUs, maximumFrontier=maximumFrontier,
                                     evaluationTimeout=evaluationTimeout)
-from collections import Counter
-
-class Vocab(object):
-    def __init__(self, sents):
-        v = ['<pad>', '<go>', '<eos>', '<unk>', '<blank>']
-        words = [w for s in sents for w in s]
-        cnt = Counter(words)
-        n_unk = len(words)
-        for w, c in cnt.items():
-            v.append(w)
-            n_unk -= c
-        cnt['<unk>'] = n_unk
-        self.word2idx = {}
-        self.idx2word = []
-        for w in v:
-            self.word2idx[w] = len(self.word2idx)
-            self.idx2word.append(w)
-
-        self.size = len(self.word2idx)
-
-        self.pad = self.word2idx['<pad>']
-        self.go = self.word2idx['<go>']
-        self.eos = self.word2idx['<eos>']
-        self.unk = self.word2idx['<unk>']
-        self.blank = self.word2idx['<blank>']
 
 class RecurrentFeatureExtractor(nn.Module):
     def __init__(self, _=None,
@@ -1270,12 +1246,12 @@ class RecurrentFeatureExtractor(nn.Module):
             raw_data.extend(self.get_data(task.examples))
         self.vocab = Vocab(raw_data)
         if enc == 'vae_enc':
-            self.model = VAE_Encoder(self.vocab)
+            self.model = VAE_Encoder(self.vocab, dim_emb=H, dim_h=H, dim_z=H)
         elif enc == 'mmd':
-            self.model = MMD_VAE(self.vocab)
+            self.model = MMD_VAE(self.vocab, dim_emb=H, dim_h=H, dim_z=H)
         else:
             raise NotImplementedError("Nothing mathces enc="+enc)
-        self.H = self.model.dim_z
+        self.H = H
 
 
         # Maximum number of inputs/outputs we will run the recognition

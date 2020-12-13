@@ -5,9 +5,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from dreamcoder.domains.list.batchify import get_batch
-DIM_EMB = 128
-DIM_H = 128
-DIM_Z = 32
+DIM_EMB = 64
+DIM_H = 64
+DIM_Z = 64
 
 def reparameterize(mu, logvar):
     # [dim_z, batch_size]
