@@ -183,7 +183,8 @@ class LearnedFeatureExtractor(RecurrentFeatureExtractor):
 
         return tokenized
 
-    def __init__(self, tasks, testingTasks=[], cuda=False):
+    def __init__(self, tasks, testingTasks=[], cuda=False,
+                 enc=None):
         self.lexicon = set(flatten((t.examples for t in tasks + testingTasks), abort=lambda x: isinstance(
             x, str))).union({"LIST_START", "LIST_END", "?"})
 
@@ -204,7 +205,7 @@ class LearnedFeatureExtractor(RecurrentFeatureExtractor):
             tasks=tasks,
             cuda=cuda,
             H=self.H,
-            bidirectional=True)
+            bidirectional=True, enc=enc)
 
     def tokenized_to_idx(self, tokenized):
         es = []

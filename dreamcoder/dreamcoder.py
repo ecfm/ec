@@ -174,7 +174,7 @@ def ecIterator(grammar, tasks,
                storeTaskMetrics=False,
                rewriteTaskMetrics=True,
                auxiliaryLoss=False,
-               custom_wake_generative=None):
+               custom_wake_generative=None, enc=None):
     if enumerationTimeout is None:
         eprint(
             "Please specify an enumeration timeout:",
@@ -362,9 +362,6 @@ def ecIterator(grammar, tasks,
             
         sys.exit(0)
 
-    extractor = featureExtractor(tasks, testingTasks, cuda)
-    discriminator = extractor.train_discriminator(outputPrefix, result)
-    # discriminator.eval()
     for j in range(resume or 0, iterations):
         if storeTaskMetrics and rewriteTaskMetrics:
             eprint("Resetting task metrics for next iteration.")
@@ -447,7 +444,7 @@ def ecIterator(grammar, tasks,
                                helmholtzRatio=thisRatio, helmholtzBatch=helmholtzBatch, helmholtzFrontiers=helmholtzFrontiers(),
                                auxiliaryLoss=auxiliaryLoss, cuda=cuda, CPUs=CPUs, solver=solver,
                                recognitionSteps=recognitionSteps, maximumFrontier=maximumFrontier,
-                               discriminator=discriminator, outputPrefix=outputPrefix, iteration=j)
+                               outputPrefix=outputPrefix, iteration=j, enc=enc)
 
             showHitMatrix(tasksHitTopDown, tasksHitBottomUp, wakingTaskBatch)
             
@@ -567,10 +564,10 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                       timeout=None, enumerationTimeout=None, evaluationTimeout=None,
                       helmholtzRatio=None, helmholtzBatch=None, helmholtzFrontiers=None, maximumFrontier=None,
                       auxiliaryLoss=None, cuda=None, CPUs=None, solver=None, discriminator=None, outputPrefix=None,
-                      iteration=None):
+                      iteration=None, enc=None):
     eprint("Using an ensemble size of %d. Note that we will only store and test on the best recognition model." % ensembleSize)
 
-    featureExtractorObjects = [featureExtractor(tasks, testingTasks=testingTasks, cuda=cuda) for i in range(ensembleSize)]
+    featureExtractorObjects = [featureExtractor(tasks, testingTasks=testingTasks, cuda=cuda, enc=enc) for i in range(ensembleSize)]
     recognizers = [RecognitionModel(featureExtractorObjects[i],
                                     grammar,
                                     mask=mask,
@@ -925,6 +922,15 @@ def commandlineArguments(_=None,
         default=taskReranker,
         type=str)
     parser.add_argument(
+        "--enc",
+        dest="enc",
+        help="Type of encoder to use",
+        choices=[
+            "vae_enc",
+            "mmd"],
+        default='vae_enc',
+        type=str)
+    parser.add_argument(
         "--storeTaskMetrics",
         dest="storeTaskMetrics",
         default=True,
@@ -959,6 +965,7 @@ def commandlineArguments(_=None,
                         featureExtractor=featureExtractor,
                         maximumFrontier=maximumFrontier,
                         cuda=cuda)
+
     if extras is not None:
         extras(parser)
     v = vars(parser.parse_args())

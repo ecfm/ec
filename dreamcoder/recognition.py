@@ -1,3 +1,8 @@
+import collections
+
+from dreamcoder.domains.list.batchify import get_batch
+from dreamcoder.domains.list.meter import AverageMeter
+from dreamcoder.domains.list.model import VAE_Encoder, MMD_VAE
 from dreamcoder.domains.list.train import plot_hist
 from dreamcoder.enumeration import *
 from dreamcoder.grammar import *
@@ -717,14 +722,14 @@ class RecognitionModel(nn.Module):
         return primitivesDict
 
     def grammarOfTask(self, task):
-        features = self.featureExtractor.featuresOfTask(task)
+        features, _ = self.featureExtractor.featuresOfTask(task, dreaming=True)
         if features is None: return None
         return self(features)
 
     def grammarLogProductionsOfTask(self, task):
         """Returns the grammar logits from non-contextual models."""
 
-        features = self.featureExtractor.featuresOfTask(task)
+        features, _ = self.featureExtractor.featuresOfTask(task, dreaming=True)
         if features is None: return None
 
         if hasattr(self, 'hiddenLayers'):
@@ -793,16 +798,16 @@ class RecognitionModel(nn.Module):
                 for g in [self.grammarOfTask(task).untorch().noParent] }
 
     def taskHiddenStates(self, tasks):
-        return {task: self._MLP(self.featureExtractor.featuresOfTask(task)).view(-1).data.cpu().numpy()
+        return {task: self._MLP(self.featureExtractor.featuresOfTask(task, dreaming=True)[0]).view(-1).data.cpu().numpy()
                 for task in tasks}
 
     def taskGrammarEntropies(self, tasks):
         return {task: self.grammarEntropyOfTask(task).data.cpu().numpy()
                 for task in tasks}
 
-    def frontierKL(self, frontier, auxiliary=False, vectorized=True):
-        features, examples = self.featureExtractor.featuresOfTask(frontier.task, return_examples=True)
-        if features is None: return None, None, None
+    def frontierKL(self, frontier, auxiliary=False, vectorized=True, dreaming=False):
+        features, extractor_losses = self.featureExtractor.featuresOfTask(frontier.task, dreaming)
+        if features is None: return None, None
         # Monte Carlo estimate: draw a sample from the frontier
         entry = frontier.sample()
 
@@ -810,11 +815,11 @@ class RecognitionModel(nn.Module):
 
         if not vectorized:
             g = self(features)
-            return - entry.program.logLikelihood(g), al, examples
+            return - entry.program.logLikelihood(g), al
         else:
             features = self._MLP(features).expand(1, features.size(-1))
             ll = self.grammarBuilder.batchedLogLikelihoods(features, [entry.program]).view(-1)
-            return -ll, al, examples
+            return -ll, al, extractor_losses
             
 
     def frontierBiasOptimal(self, frontier, auxiliary=False, vectorized=True):
@@ -1017,7 +1022,7 @@ class RecognitionModel(nn.Module):
         classificationLosses = []
         totalGradientSteps = 0
         epochs = 9999999
-        dreamMMD_means = []
+        extractor_loss_meters = collections.defaultdict(lambda: AverageMeter())
         for i in range(1, epochs + 1):
             if timeout and time.time() - start > timeout:
                 break
@@ -1037,9 +1042,9 @@ class RecognitionModel(nn.Module):
                 dreaming = random.random() < helmholtzRatio
                 if dreaming: frontier = getHelmholtz()
                 self.zero_grad()
-                loss, classificationLoss, examples = \
+                loss, classificationLoss, extractor_losses = \
                         self.frontierBiasOptimal(frontier, auxiliary=auxLoss, vectorized=vectorized) if biasOptimal \
-                        else self.frontierKL(frontier, auxiliary=auxLoss, vectorized=vectorized)
+                        else self.frontierKL(frontier, auxiliary=auxLoss, vectorized=vectorized, dreaming=dreaming)
                 if loss is None:
                     if not dreaming:
                         eprint("ERROR: Could not extract features during experience replay.")
@@ -1051,15 +1056,7 @@ class RecognitionModel(nn.Module):
                 if is_torch_invalid(loss):
                     eprint("Invalid real-data loss!")
                 else:
-                    if dreaming and (not discriminator is None) and (not examples is None) and (len(examples) > 0):
-                        weight, mmd = discriminator.get_weights(self.featureExtractor, examples)
-                        if weight is not None:
-                            dreamMMD.append(mmd)
-                            ((loss + classificationLoss) * weight).backward()
-                        else:
-                            (loss + classificationLoss).backward()
-                    else:
-                        (loss + classificationLoss).backward()
+                    (loss + classificationLoss + sum(extractor_losses.values())).backward()
                     classificationLosses.append(classificationLoss.data.item())
                     optimizer.step()
                     totalGradientSteps += 1
@@ -1071,6 +1068,9 @@ class RecognitionModel(nn.Module):
                     else:
                         realLosses.append(losses[-1])
                         realMDL.append(descriptionLengths[-1])
+                    if extractor_losses:
+                        for k, v in extractor_losses.items():
+                            extractor_loss_meters[k].update(v.item())
                     if totalGradientSteps > steps:
                         break # Stop iterating, then print epoch and loss, then break to finish.
                         
@@ -1078,11 +1078,9 @@ class RecognitionModel(nn.Module):
                 eprint("(ID=%d): " % self.id, "Epoch", i, "Loss", mean(losses))
                 if realLosses and dreamLosses:
                     eprint("(ID=%d): " % self.id, "\t\t(real loss): ", mean(realLosses),
-                           "\t(dream loss):", mean(dreamLosses), "\t(dream MMD):", mean(dreamMMD))
-                if dreamMMD:
-                    eprint("(ID=%d): " % self.id, "\t\t(dream MMD) mean:", mean(dreamMMD),
-                           "\thistogram:", np.histogram(dreamMMD, density=True))
-                    dreamMMD_means.append(mean(dreamMMD))
+                           "\t(dream loss):", mean(dreamLosses))
+                for k, meter in extractor_loss_meters.items():
+                    eprint("(ID=%d): " % self.id, "\t\t(extractor %s loss) mean:" % k, meter.avg)
                 eprint("(ID=%d): " % self.id, "\tvs MDL (w/o neural net)", mean(descriptionLengths))
                 if realMDL and dreamMDL:
                     eprint("\t\t(real MDL): ", mean(realMDL), "\t(dream MDL):", mean(dreamMDL))
@@ -1095,12 +1093,7 @@ class RecognitionModel(nn.Module):
                 classificationLosses = []
                 gc.collect()
 
-        eprint("(ID=%d): " % self.id, " Trained recognition model in",time.time() - start,"seconds; dreamMMD_mean=",
-               mean(dreamMMD_means), "\thistogram:", np.histogram(dreamMMD_means, density=True))
-        import matplotlib.pyplot as plt
-        plt.figure()
-        plot_hist(dreamMMD, 'dream')
-        plt.savefig(os.path.join(outputPrefix, 'dream_dist_iter_%d.png' % iteration))
+        eprint("(ID=%d): " % self.id, " Trained recognition model in",time.time() - start,"seconds")
         self.trained=True
         return self
 
@@ -1177,7 +1170,31 @@ class RecognitionModel(nn.Module):
                                     enumerationTimeout=enumerationTimeout,
                                     CPUs=CPUs, maximumFrontier=maximumFrontier,
                                     evaluationTimeout=evaluationTimeout)
+from collections import Counter
 
+class Vocab(object):
+    def __init__(self, sents):
+        v = ['<pad>', '<go>', '<eos>', '<unk>', '<blank>']
+        words = [w for s in sents for w in s]
+        cnt = Counter(words)
+        n_unk = len(words)
+        for w, c in cnt.items():
+            v.append(w)
+            n_unk -= c
+        cnt['<unk>'] = n_unk
+        self.word2idx = {}
+        self.idx2word = []
+        for w in v:
+            self.word2idx[w] = len(self.word2idx)
+            self.idx2word.append(w)
+
+        self.size = len(self.word2idx)
+
+        self.pad = self.word2idx['<pad>']
+        self.go = self.word2idx['<go>']
+        self.eos = self.word2idx['<eos>']
+        self.unk = self.word2idx['<unk>']
+        self.blank = self.word2idx['<blank>']
 
 class RecurrentFeatureExtractor(nn.Module):
     def __init__(self, _=None,
@@ -1193,7 +1210,9 @@ class RecurrentFeatureExtractor(nn.Module):
                  # What should be the timeout for trying to construct Helmholtz tasks?
                  helmholtzTimeout=0.25,
                  # What should be the timeout for running a Helmholtz program?
-                 helmholtzEvaluationTimeout=0.01):
+                 helmholtzEvaluationTimeout=0.01,
+                 save_dir=None,
+                 enc=None):
         super(RecurrentFeatureExtractor, self).__init__()
 
         assert tasks is not None, "You must provide a list of all of the tasks, both those that have been hit and those that have not been hit. Input examples are sampled from these tasks."
@@ -1233,17 +1252,10 @@ class RecurrentFeatureExtractor(nn.Module):
             "ENDOFINPUT"  # delimits the ending of an input - we might have multiple inputs
         ]
         lexicon += self.specialSymbols
-        encoder = nn.Embedding(len(lexicon), H)
-        self.encoder = encoder
 
-        self.H = H
         self.bidirectional = bidirectional
 
         layers = 1
-
-        model = nn.GRU(H, H, layers, bidirectional=bidirectional)
-        self.model = model
-
         self.use_cuda = cuda
         self.lexicon = lexicon
         self.symbolToIndex = {
@@ -1253,6 +1265,18 @@ class RecurrentFeatureExtractor(nn.Module):
         self.endingIndex = self.symbolToIndex["ENDING"]
         self.startOfOutputIndex = self.symbolToIndex["STARTOFOUTPUT"]
         self.endOfInputIndex = self.symbolToIndex["ENDOFINPUT"]
+        raw_data = []
+        for task in tasks:
+            raw_data.extend(self.get_data(task.examples))
+        self.vocab = Vocab(raw_data)
+        if enc == 'vae_enc':
+            self.model = VAE_Encoder(self.vocab)
+        elif enc == 'mmd':
+            self.model = MMD_VAE(self.vocab)
+        else:
+            raise NotImplementedError("Nothing mathces enc="+enc)
+        self.H = self.model.dim_z
+
 
         # Maximum number of inputs/outputs we will run the recognition
         # model on per task
@@ -1268,57 +1292,20 @@ class RecurrentFeatureExtractor(nn.Module):
     # you should override this if needed
     def tokenize(self, x): return x
 
-    def symbolEmbeddings(self):
-        return {s: self.encoder(variable([self.symbolToIndex[s]])).squeeze(
-            0).data.cpu().numpy() for s in self.lexicon if not (s in self.specialSymbols)}
-
-    def packExamples(self, examples):
-        """IMPORTANT! xs must be sorted in decreasing order of size because pytorch is stupid"""
-        es = []
-        sizes = []
-        for xs, y in examples:
-            e = [self.startingIndex]
-            for x in xs:
-                for s in x:
-                    e.append(self.symbolToIndex[s])
-                e.append(self.endOfInputIndex)
-            e.append(self.startOfOutputIndex)
-            for s in y:
-                e.append(self.symbolToIndex[s])
-            e.append(self.endingIndex)
-            if es != []:
-                assert len(e) <= len(es[-1]), \
-                    "Examples must be sorted in decreasing order of their tokenized size. This should be transparently handled in recognition.py, so if this assertion fails it isn't your fault as a user of EC but instead is a bug inside of EC."
-            es.append(e)
-            sizes.append(len(e))
-
-        m = max(sizes)
-        # padding
-        for j, e in enumerate(es):
-            es[j] += [self.endingIndex] * (m - len(e))
-
-        x = variable(es, cuda=self.use_cuda)
-        x = self.encoder(x)
-        # x: (batch size, maximum length, E)
-        x = x.permute(1, 0, 2)
-        # x: TxBxE
-        x = pack_padded_sequence(x, sizes)
-        return x, sizes
-
-    def examplesEncoding(self, examples, return_examples=False):
+    def examplesEncoding(self, examples, dreaming):
         examples = sorted(examples, key=lambda xs_y: sum(
             len(z) + 1 for z in xs_y[0]) + len(xs_y[1]), reverse=True)
-        x, sizes = self.packExamples(examples)
-        outputs, hidden = self.model(x)
+        data = self.get_data(examples)
+        if data is None or len(data) == 0:
+            return None, None
+        inputs, targets = get_batch(data, self.vocab, 'cuda')
+        hidden, losses = self.model.autoenc(inputs, targets, (not dreaming))
         # outputs, sizes = pad_packed_sequence(outputs)
         # I don't know whether to return the final output or the final hidden
         # activations...
-        if return_examples:
-            return hidden[0, :, :] + hidden[1, :, :], examples
-        else:
-            return hidden[0, :, :] + hidden[1, :, :]
+        return hidden, losses
 
-    def forward(self, examples, return_examples=False):
+    def forward(self, examples, dreaming):
         tokenized = self.tokenize(examples)
         if not tokenized:
             return None
@@ -1327,10 +1314,7 @@ class RecurrentFeatureExtractor(nn.Module):
             tokenized = list(tokenized)
             random.shuffle(tokenized)
             tokenized = tokenized[:self.MAXINPUTS]
-        if return_examples:
-            e, examples = self.examplesEncoding(tokenized, return_examples)
-        else:
-            e = self.examplesEncoding(tokenized, return_examples)
+        e, losses = self.examplesEncoding(tokenized, dreaming)
         # max pool
         # e,_ = e.max(dim = 0)
 
@@ -1338,18 +1322,15 @@ class RecurrentFeatureExtractor(nn.Module):
         # I think this might be better because we might be testing on data
         # which has far more o far fewer examples then training
         e = e.mean(dim=0)
-        if return_examples:
-            return e, examples
-        else:
-            return e
+        return e, losses
 
-    def featuresOfTask(self, t, return_examples=False):
+    def featuresOfTask(self, t, dreaming):
         if hasattr(self, 'useFeatures'):
-            result = self(t.features, return_examples)
+            f, losses = self(t.features, dreaming)
         else:
             # Featurize the examples directly.
-            result = self(t.examples, return_examples)
-        return result
+            f, losses = self(t.examples, dreaming)
+        return f, losses
 
     def taskOfProgram(self, p, tp):
         # half of the time we randomly mix together inputs

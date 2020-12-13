@@ -14,9 +14,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 BATCH_SIZE = 64
-DIM_EMB = 128
-DIM_H = 128
-DIM_Z = 16
 EPOCHS = 20
 
 
@@ -60,7 +57,7 @@ def train_model(save_dir, raw_data, epochs=EPOCHS):
     set_seed(1111)
     cuda = torch.cuda.is_available()
     device = torch.device('cuda' if cuda else 'cpu')
-    model = MMD_VAE(vocab, dim_emb=DIM_EMB, dim_h=DIM_H, dim_z=DIM_Z).to(device)
+    model = MMD_VAE(vocab).to(device)
 
     logging('# model parameters: {}'.format(
         sum(x.data.nelement() for x in model.parameters())), log_file)

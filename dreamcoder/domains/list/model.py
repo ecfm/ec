@@ -5,7 +5,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from dreamcoder.domains.list.batchify import get_batch
-
+DIM_EMB = 128
+DIM_H = 128
+DIM_Z = 16
 
 def reparameterize(mu, logvar):
     # [dim_z, batch_size]
@@ -134,7 +136,7 @@ class DAE(TextModel):
 class VAE(DAE):
     """Variational Auto-Encoder"""
 
-    def __init__(self, vocab, dim_emb=64, dim_h=64, dim_z=16):
+    def __init__(self, vocab, dim_emb=DIM_EMB, dim_h=DIM_H, dim_z=DIM_Z):
         super().__init__(vocab, dim_emb, dim_h, dim_z)
         self.lambda_kl = 1
 
@@ -148,7 +150,7 @@ class VAE(DAE):
 
 
 class MMD_VAE(DAE):
-    def __init__(self, vocab, dim_emb=64, dim_h=64, dim_z=16):
+    def __init__(self, vocab, dim_emb=DIM_EMB, dim_h=DIM_H, dim_z=DIM_Z):
         super().__init__(vocab, dim_emb, dim_h, dim_z)
         self.dim_z = dim_z
 
@@ -160,17 +162,26 @@ class MMD_VAE(DAE):
         std = torch.exp(0.5 * logvar)
         return eps.mul(std).add_(mu)
 
+    def forward(self, input, is_train=False):
+        mu, logvar = self.encode(input)
+        z = reparameterize(mu, logvar)
+        if not is_train:
+            return z
+        logits, _ = self.decode(z, input)
+        return mu, logvar, z, logits
 
     def sample_mmd(self, mu, logvar):
         return MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'),
                    self.reparameterize_samples(mu, logvar)).item()
 
     def autoenc(self, inputs, targets, is_train=False):
-        mu, logvar, z, logits = self(inputs, is_train)
-        return {'rec': self.loss_rec(logits, targets).mean(),
-                'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z),
-                'mmd_all': [self.sample_mmd(mu[i, :], logvar[i, :])
-                            for i in range(inputs.shape[1])]}
+        if is_train:
+            mu, logvar, z, logits = self(inputs, is_train)
+            return {'rec': self.loss_rec(logits, targets).mean(),
+                    'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z)}
+        else:
+            z = self(inputs, is_train)
+            return z, {}
 
     def get_weights(self, extractor, examples):
         data = extractor.get_data(examples)
@@ -181,6 +192,22 @@ class MMD_VAE(DAE):
         z = reparameterize(mu, logvar)
         mmd = MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z).item()
         return 1-mmd, mmd
+
+
+class VAE_Encoder(DAE):
+    def __init__(self, vocab, dim_emb=DIM_EMB, dim_h=DIM_H, dim_z=DIM_Z):
+        super().__init__(vocab, dim_emb, dim_h, dim_z)
+        self.dim_z = dim_z
+
+    def forward(self, input, is_train=False):
+        mu, logvar = self.encode(input)
+        z = reparameterize(mu, logvar)
+        return z
+
+    def autoenc(self, inputs, targets, is_train=False):
+        z = self(inputs, is_train)
+        return z, {}
+
 
 def gaussian_kernel(a, b):
     dim1_1, dim1_2 = a.shape[0], b.shape[0]
