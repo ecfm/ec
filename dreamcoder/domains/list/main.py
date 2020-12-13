@@ -228,7 +228,7 @@ class LearnedFeatureExtractor(RecurrentFeatureExtractor):
             return []
         return self.tokenized_to_idx(tokenized)
 
-    def train_discriminator(self, save_dir, result):
+    def train_enc(self, save_dir, result):
         raw_data = []
         for frontier in result.allFrontiers.values():
             raw_data.extend(self.get_data(frontier.task.examples))

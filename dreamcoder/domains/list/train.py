@@ -13,25 +13,21 @@ from dreamcoder.domains.list.vocab import Vocab
 import numpy as np
 import matplotlib.pyplot as plt
 
-BATCH_SIZE = 64
-EPOCHS = 20
+BATCH_SIZE = 128
+EPOCHS = 100
 
 
 def evaluate(model, batches):
     model.eval()
     meters = collections.defaultdict(lambda: AverageMeter())
-    mmd_all = []
     with torch.no_grad():
         for inputs, targets in batches:
-            losses = model.autoenc(inputs, targets)
+            _, losses = model.autoenc(inputs, targets, use_decoder=True)
             for k, v in losses.items():
-                if k == 'mmd_all':
-                    mmd_all.extend(v)
-                else:
-                    meters[k].update(v.item(), inputs.size(1))
+                meters[k].update(v.item(), inputs.size(1))
     loss = model.loss({k: meter.avg for k, meter in meters.items()})
     meters['loss'].update(loss)
-    return meters, mmd_all
+    return meters
 
 
 def plot_hist(x, label, alpha=1.):
@@ -75,16 +71,12 @@ def train_model(save_dir, raw_data, epochs=EPOCHS):
         meters = collections.defaultdict(lambda: AverageMeter())
         indices = list(range(len(train_batches)))
         random.shuffle(indices)
-        train_mmd_all = []
         for i, idx in enumerate(indices):
             inputs, targets = train_batches[idx]
-            losses = model.autoenc(inputs, targets, is_train=True)
+            _, losses = model.autoenc(inputs, targets, use_decoder=True)
             losses['loss'] = model.loss(losses)
-            train_mmd_all.extend(losses['mmd_all'])
             model.step(losses)
             for k, v in losses.items():
-                if k == 'mmd_all':
-                    continue
                 meters[k].update(v.item())
 
             if (i + 1) % 10 == 0:
@@ -95,7 +87,7 @@ def train_model(save_dir, raw_data, epochs=EPOCHS):
                     meter.clear()
                 logging(log_output, log_file)
 
-        valid_meters, valid_mmd_all = evaluate(model, valid_batches)
+        valid_meters = evaluate(model, valid_batches)
         logging('-' * 80, log_file)
         log_output = '| end of epoch {:3d} | time {:5.0f}s | valid'.format(
             epoch + 1, time.time() - start_time)
@@ -106,21 +98,9 @@ def train_model(save_dir, raw_data, epochs=EPOCHS):
             ckpt = {'model': model.state_dict()}
             torch.save(ckpt, best_model_path)
             best_val_loss = valid_meters['loss'].avg
-            best_train_mmd_all = train_mmd_all
-            best_valid_mmd_all = valid_mmd_all
         logging(log_output, log_file)
     logging('Done training', log_file)
     ckpt = torch.load(best_model_path)
     model.load_state_dict(ckpt['model'])
     model.flatten()
-    print("Best train MMD losses histogram:")
-    print(np.histogram(best_train_mmd_all, density=True))
-    print("Best valid MMD losses histogram:")
-    print(np.histogram(best_valid_mmd_all, density=True))
-    plt.figure()
-    plot_hist(best_train_mmd_all, 'train')
-    plt.savefig(os.path.join(save_dir, 'train_dist.png'))
-    plt.figure()
-    plot_hist(best_train_mmd_all, 'valid')
-    plt.savefig(os.path.join(save_dir, 'valid_dist.png'))
     return model

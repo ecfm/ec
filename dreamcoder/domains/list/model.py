@@ -7,7 +7,7 @@ import torch.optim as optim
 from dreamcoder.domains.list.batchify import get_batch
 DIM_EMB = 128
 DIM_H = 128
-DIM_Z = 16
+DIM_Z = 32
 
 def reparameterize(mu, logvar):
     # [dim_z, batch_size]
@@ -174,13 +174,13 @@ class MMD_VAE(DAE):
         return MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'),
                    self.reparameterize_samples(mu, logvar)).item()
 
-    def autoenc(self, inputs, targets, is_train=False):
-        if is_train:
-            mu, logvar, z, logits = self(inputs, is_train)
+    def autoenc(self, inputs, targets, use_decoder=False):
+        if use_decoder:
+            mu, logvar, z, logits = self(inputs, use_decoder)
             return z, {'rec': self.loss_rec(logits, targets).mean(),
                        'mmd': MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z)}
         else:
-            z = self(inputs, is_train)
+            z = self(inputs, use_decoder)
             return z, {}
 
     def get_weights(self, extractor, examples):
@@ -204,8 +204,8 @@ class VAE_Encoder(DAE):
         z = reparameterize(mu, logvar)
         return z
 
-    def autoenc(self, inputs, targets, is_train=False):
-        z = self(inputs, is_train)
+    def autoenc(self, inputs, targets, use_decoder=False):
+        z = self(inputs)
         return z, {}
 
 

@@ -174,7 +174,7 @@ def ecIterator(grammar, tasks,
                storeTaskMetrics=False,
                rewriteTaskMetrics=True,
                auxiliaryLoss=False,
-               custom_wake_generative=None, enc=None):
+               custom_wake_generative=None, enc=None, pretrainEnc=False):
     if enumerationTimeout is None:
         eprint(
             "Please specify an enumeration timeout:",
@@ -444,7 +444,7 @@ def ecIterator(grammar, tasks,
                                helmholtzRatio=thisRatio, helmholtzBatch=helmholtzBatch, helmholtzFrontiers=helmholtzFrontiers(),
                                auxiliaryLoss=auxiliaryLoss, cuda=cuda, CPUs=CPUs, solver=solver,
                                recognitionSteps=recognitionSteps, maximumFrontier=maximumFrontier,
-                               outputPrefix=outputPrefix, iteration=j, enc=enc)
+                               outputPrefix=outputPrefix, iteration=j, enc=enc, pretrainEnc=pretrainEnc)
 
             showHitMatrix(tasksHitTopDown, tasksHitBottomUp, wakingTaskBatch)
             
@@ -564,7 +564,7 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                       timeout=None, enumerationTimeout=None, evaluationTimeout=None,
                       helmholtzRatio=None, helmholtzBatch=None, helmholtzFrontiers=None, maximumFrontier=None,
                       auxiliaryLoss=None, cuda=None, CPUs=None, solver=None, discriminator=None, outputPrefix=None,
-                      iteration=None, enc=None):
+                      iteration=None, enc=None, pretrainEnc=False):
     eprint("Using an ensemble size of %d. Note that we will only store and test on the best recognition model." % ensembleSize)
 
     featureExtractorObjects = [featureExtractor(tasks, testingTasks=testingTasks, cuda=cuda, enc=enc) for i in range(ensembleSize)]
@@ -577,6 +577,12 @@ def sleep_recognition(result, grammar, taskBatch, tasks, testingTasks, allFronti
                                     contextual=contextual,
                                     previousRecognitionModel=previousRecognitionModel,
                                     id=i) for i in range(ensembleSize)]
+    for i in range(ensembleSize):
+        if not pretrainEnc:
+            continue
+        recognizers[i].featureExtractor.model = recognizers[i].featureExtractor.train_enc(save_dir=outputPrefix,
+                                                                                               result=result)
+        recognizers[i].featureExtractor.model.train()
     eprint(f"Currently using this much memory: {getThisMemoryUsage()}")
     trainedRecognizers = parallelMap(min(CPUs,len(recognizers)),
                                      lambda recognizer: recognizer.train(allFrontiers,
@@ -930,6 +936,12 @@ def commandlineArguments(_=None,
             "mmd"],
         default='vae_enc',
         type=str)
+    parser.add_argument(
+        "--pretrainEnc",
+        dest="pretrainEnc",
+        default=False,
+        help="Whether to pretrain enc"
+        )
     parser.add_argument(
         "--storeTaskMetrics",
         dest="storeTaskMetrics",
