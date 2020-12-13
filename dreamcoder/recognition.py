@@ -1053,8 +1053,11 @@ class RecognitionModel(nn.Module):
                 else:
                     if dreaming and (not discriminator is None) and (not examples is None) and (len(examples) > 0):
                         weight, mmd = discriminator.get_weights(self.featureExtractor, examples)
-                        dreamMMD.append(mmd)
-                        ((loss + classificationLoss) * weight).backward()
+                        if weight is None:
+                            dreamMMD.append(mmd)
+                            ((loss + classificationLoss) * weight).backward()
+                        else:
+                            (loss + classificationLoss).backward()
                     else:
                         (loss + classificationLoss).backward()
                     classificationLosses.append(classificationLoss.data.item())

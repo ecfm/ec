@@ -174,6 +174,8 @@ class MMD_VAE(DAE):
 
     def get_weights(self, extractor, examples):
         data = extractor.get_data(examples)
+        if examples is None or len(examples) == 0:
+            return None, None
         inputs, targets = get_batch(data, self.vocab, 'cuda')
         mu, logvar = self.encode(inputs)
         z = reparameterize(mu, logvar)
