@@ -1051,7 +1051,7 @@ class RecognitionModel(nn.Module):
                 if is_torch_invalid(loss):
                     eprint("Invalid real-data loss!")
                 else:
-                    if dreaming and (not discriminator is None) and (not examples is None):
+                    if dreaming and (not discriminator is None) and (not examples is None) and (len(examples) > 0):
                         weight, mmd = discriminator.get_weights(self.featureExtractor, examples)
                         dreamMMD.append(mmd)
                         ((loss + classificationLoss) * weight).backward()
