@@ -17,7 +17,7 @@ BATCH_SIZE = 64
 DIM_EMB = 128
 DIM_H = 128
 DIM_Z = 16
-EPOCHS = 200
+EPOCHS = 20
 
 
 def evaluate(model, batches):
