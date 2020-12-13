@@ -1315,6 +1315,8 @@ class RecurrentFeatureExtractor(nn.Module):
             random.shuffle(tokenized)
             tokenized = tokenized[:self.MAXINPUTS]
         e, losses = self.examplesEncoding(tokenized, dreaming)
+        if e is None:
+            return None, None
         # max pool
         # e,_ = e.max(dim = 0)
 
