@@ -1268,10 +1268,10 @@ class RecurrentFeatureExtractor(nn.Module):
     # you should override this if needed
     def tokenize(self, x): return x
 
-    def examplesEncoding(self, examples, dreaming):
-        examples = sorted(examples, key=lambda xs_y: sum(
+    def examplesEncoding(self, tokenized, dreaming):
+        tokenized = sorted(tokenized, key=lambda xs_y: sum(
             len(z) + 1 for z in xs_y[0]) + len(xs_y[1]), reverse=True)
-        data = self.get_data(examples)
+        data = self.tokenized_to_idx(tokenized)
         if data is None or len(data) == 0:
             return None, None
         inputs, targets = get_batch(data, self.vocab, 'cuda')

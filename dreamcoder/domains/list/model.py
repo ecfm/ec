@@ -185,16 +185,6 @@ class MMD_VAE(DAE):
             z = self(inputs, use_decoder)
             return z, {}
 
-    def get_weights(self, extractor, examples):
-        data = extractor.get_data(examples)
-        if data is None or len(data) == 0:
-            return None, None
-        inputs, targets = get_batch(data, self.vocab, 'cuda')
-        mu, logvar = self.encode(inputs)
-        z = reparameterize(mu, logvar)
-        mmd = MMD(torch.randn(200, self.dim_z, requires_grad=False).to('cuda'), z).item()
-        return 1-mmd, mmd
-
 
 class VAE_Encoder(DAE):
     def __init__(self, vocab, dim_emb=DIM_EMB, dim_h=DIM_H, dim_z=DIM_Z):
